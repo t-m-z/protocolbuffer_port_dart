@@ -1,0 +1,11 @@
+name: protobuf_codec
+description: >
+  A small, dependency-free Dart implementation of the Protocol Buffers
+  binary wire format: varint/zigzag helpers, a low-level writer/reader for
+  the wire format, and a ProtoMessage base class for hand-written message
+  classes (no .proto compiler / code generation required).
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.0.0
