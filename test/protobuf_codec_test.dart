@@ -2,6 +2,7 @@
 // `package:test` (and therefore no network access) just to verify itself.
 // Run with: dart test/protobuf_codec_test.dart
 
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:protobuf_codec/protobuf_codec.dart';
@@ -30,8 +31,8 @@ void expectThrows(void Function() body, String label) {
     _failures++;
     // ignore: avoid_print
     print('FAIL: $label (expected an exception, none was thrown)');
-  } on ProtoDecodeException {
-    // expected
+  } on Exception {
+    // expected (covers ProtoDecodeException and FormatException alike)
   }
 }
 
@@ -220,6 +221,93 @@ void main() {
       },
       'length-delimited field longer than remaining buffer',
     );
+  });
+
+  group('decodeProtocolBuffer (generic, no .proto)', () {
+    // Same bytes as the "writer/reader scalar fields" message above, built
+    // independently to also double as a schema-less decode check.
+    final writer = ProtoWriter();
+    writer.writeInt32(1, -42);
+    writer.writeString(2, 'hello');
+    final nested = ProtoWriter();
+    nested.writeSint32(1, 5);
+    writer.writeMessageField(3, nested.toBytes());
+    final bytes = writer.toBytes();
+
+    final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    final fields = decodeProtocolBuffer(hex);
+
+    expect(fields.length, 3, 'top-level field count');
+    expect(fields[0].fieldNumber, 1, 'field 1 number');
+    expect(fields[0].wireType, WireType.varint, 'field 1 wire type');
+    expect(fields[0].value, -42, 'field 1 raw varint value');
+
+    expect(fields[1].fieldNumber, 2, 'field 2 number');
+    expect(fields[1].text, 'hello', 'field 2 recognised as text');
+
+    expect(fields[2].fieldNumber, 3, 'field 3 number');
+    final innerMessage = fields[2].message;
+    expect(innerMessage != null, true, 'field 3 recognised as nested message');
+    expect(innerMessage!.length, 1, 'nested message field count');
+    expect(innerMessage[0].fieldNumber, 1, 'nested field number');
+
+    // Whitespace-separated hex (as it's often pasted/copied) and upper case
+    // both work.
+    final spaced = hex
+        .toUpperCase()
+        .replaceAllMapped(RegExp('.{2}'), (m) => '${m.group(0)} ');
+    expect(
+      decodeProtocolBuffer(spaced).length,
+      3,
+      'whitespace-padded, uppercase hex decodes the same',
+    );
+
+    // base64 input is also accepted (auto-detected).
+    final b64 = base64Encode(bytes);
+    expect(
+      decodeProtocolBuffer(b64).length,
+      3,
+      'base64 input decodes the same',
+    );
+    expect(
+      decodeProtocolBuffer(b64, format: ByteInputFormat.base64).length,
+      3,
+      'explicit ByteInputFormat.base64 works',
+    );
+
+    expectThrows(
+      () => decodeProtocolBuffer('not valid hex or base64!!'),
+      'garbage input raises FormatException',
+    );
+
+    // A real-world example: the lat/lon-ish message from earlier.
+    final person = decodeProtocolBuffer(
+      '0a180a0a0a014e10251815209703120a0a0157107a180320c704'
+      '122248616e6765722c20757020686967682c206e6f7420696e2076656765'
+      '746174696f6e',
+    );
+    expect(person.length, 2, 'address-example top-level field count');
+    expect(person[1].text, 'Hanger, up high, not in vegetation',
+        'address-example string field');
+    final coords = person[0].message;
+    expect(coords != null, true, 'address-example nested message decoded');
+    expect(coords!.length, 2, 'address-example has two coordinate groups');
+    expect(coords[0].message![1].value, 37, 'first coordinate degrees field');
+  });
+
+  group('decodeProtocolBuffer handles deprecated groups', () {
+    final writer = ProtoWriter();
+    writer.writeTag(1, WireType.startGroup);
+    writer.writeInt32(2, 99);
+    writer.writeTag(1, WireType.endGroup);
+    final bytes = writer.toBytes();
+    final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+
+    final fields = decodeProtocolBuffer(hex);
+    expect(fields.length, 1, 'one top-level group field');
+    expect(fields[0].wireType, WireType.startGroup, 'group wire type');
+    expect(fields[0].message!.length, 1, 'group contains one inner field');
+    expect(fields[0].message![0].value, 99, 'inner field value');
   });
 
   // ignore: avoid_print

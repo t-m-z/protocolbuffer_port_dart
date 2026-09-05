@@ -21,9 +21,13 @@ encoding without adding `protoc` to your build.
 - `lib/src/reader.dart` — `ProtoReader`: iterate tags, decode field values,
   skip unknown fields.
 - `lib/src/message.dart` — `ProtoMessage` base class and a `decode()` helper.
+- `lib/src/generic_decode.dart` — `decodeProtocolBuffer`/`describeProtocolBuffer`:
+  schema-less decoding of a hex/base64 string, with no `.proto` at all.
 - `example/person_example.dart` — a hand-written "address book" message
   (`Person` / `Address` / `PhoneNumber`, including a nested message, a
   repeated message field and a packed repeated scalar field).
+- `example/generic_decode.dart` — decodes an arbitrary hex/base64 string
+  with `describeProtocolBuffer`.
 - `test/protobuf_codec_test.dart` — a small dependency-free test suite.
 
 ## Usage
@@ -95,6 +99,49 @@ repeated message fields are just one `writeMessageField` call per element.
 See `example/person_example.dart` for a complete, runnable example
 (`dart run example/person_example.dart`).
 
+## Decoding without a schema
+
+If you don't have (or don't want to write) the message class, `decodeProtocolBuffer`
+walks any Protocol Buffers byte string generically, using only what the wire
+format itself guarantees — every field's number and wire type, always:
+
+```dart
+import 'package:protobuf_codec/protobuf_codec.dart';
+
+void main() {
+  // Accepts hex or base64 (auto-detected); whitespace/case in hex is fine.
+  final fields = decodeProtocolBuffer('0a0568656c6c6f100f');
+
+  for (final field in fields) {
+    print('field ${field.fieldNumber}: ${field.wireType} = ${field.value}');
+  }
+
+  // Or just get a ready-made, indented tree as a string:
+  print(describeProtocolBuffer('0a0568656c6c6f100f'));
+}
+```
+
+Since the wire format alone never says what a field *means*, `lengthDelimited`
+fields (wire type 2 — `string`, `bytes`, embedded messages, and packed
+repeated scalars all share it) are additionally, heuristically checked for:
+
+- **`text`** — set if the bytes are valid, printable UTF-8 (the shape of a
+  `string` field);
+- **`message`** — set if the bytes, on their own, fully parse as a
+  well-formed nested Protocol Buffers message with no leftover bytes (the
+  shape of an embedded message field), decoded recursively so a whole tree
+  of nested/repeated messages comes back at once.
+
+Both are best-effort guesses, not proof — a `bytes` field or a packed
+repeated field can coincidentally look like one of these, especially when
+short. `field.value` always carries the raw decoded data (`int` for
+varint/fixed32/fixed64, `Uint8List` for length-delimited) regardless. The
+deprecated `group` wire type is also handled, decoding its inline fields
+into `message`.
+
+See `example/generic_decode.dart` for a runnable version
+(`dart run example/generic_decode.dart <hex-or-base64>`).
+
 ## Supported field types
 
 | proto type                     | Writer method(s)                        | Reader method(s)                      |
@@ -143,6 +190,7 @@ dart pub get
 dart analyze
 dart test/protobuf_codec_test.dart
 dart run example/person_example.dart
+dart run example/generic_decode.dart
 ```
 
 No dependency on `package:test` is required — the test file is a small,

@@ -8,6 +8,12 @@
 /// implementations.
 library;
 
+export 'src/generic_decode.dart'
+    show
+        ByteInputFormat,
+        DecodedField,
+        decodeProtocolBuffer,
+        describeProtocolBuffer;
 export 'src/message.dart' show ProtoMessage, decode;
 export 'src/reader.dart' show ProtoReader;
 export 'src/varint.dart'
