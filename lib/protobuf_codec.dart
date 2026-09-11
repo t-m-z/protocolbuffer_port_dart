@@ -13,6 +13,7 @@ export 'src/generic_decode.dart'
         ByteInputFormat,
         DecodedField,
         decodeProtocolBuffer,
+        decodeProtocolBufferFields,
         describeProtocolBuffer;
 export 'src/message.dart' show ProtoMessage, decode;
 export 'src/reader.dart' show ProtoReader;

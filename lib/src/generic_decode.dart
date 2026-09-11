@@ -128,10 +128,14 @@ String _hex(List<int> bytes) =>
 /// [DecodedField.message] guess, so nested/repeated embedded messages come
 /// back as a full tree.
 ///
+/// This is the structured counterpart to [decodeProtocolBuffer], which
+/// wraps the same decode into a two-key report ('json'/'detail') more
+/// convenient for printing or handing to a caller that just wants text.
+///
 /// Throws [FormatException] if [input] isn't valid hex/base64, or
 /// [ProtoDecodeException] if the decoded bytes aren't a well-formed
 /// sequence of protobuf tag/value pairs.
-List<DecodedField> decodeProtocolBuffer(
+List<DecodedField> decodeProtocolBufferFields(
   String input, {
   ByteInputFormat format = ByteInputFormat.auto,
 }) {
@@ -139,15 +143,114 @@ List<DecodedField> decodeProtocolBuffer(
   return _decodeFields(ProtoReader(bytes));
 }
 
-/// Convenience wrapper around [decodeProtocolBuffer] that renders the
+/// Convenience wrapper around [decodeProtocolBufferFields] that renders the
 /// result as a human-readable, indented multi-line string (see
 /// [DecodedField.describe]) instead of a [DecodedField] tree.
 String describeProtocolBuffer(
   String input, {
   ByteInputFormat format = ByteInputFormat.auto,
 }) {
-  final fields = decodeProtocolBuffer(input, format: format);
+  final fields = decodeProtocolBufferFields(input, format: format);
   return fields.map((f) => f.describe()).join();
+}
+
+/// Decodes [input] -- a string holding raw Protocol Buffers message bytes,
+/// hex- or base64-encoded (see [format]) -- generically, with no `.proto`
+/// schema, and returns a two-key report:
+///
+/// - `'json'`: a compact `Message { fieldNumber: value, ... }` rendering
+///   (nested messages recurse as `Message { ... }`, strings are quoted,
+///   numbers are bare). This is a JSON-*like* pretty structure, not
+///   parseable JSON -- field numbers, not names, are the only keys the
+///   wire format gives us -- meant for a quick glance at the shape of the
+///   data.
+/// - `'detail'`: the same result as [describeProtocolBuffer]: one line per
+///   field with its wire type, raw bytes, and the [DecodedField.text]/
+///   [DecodedField.message] guesses spelled out.
+///
+/// For the example bytes used throughout this package's tests/README:
+/// ```dart
+/// final report = decodeProtocolBuffer(
+///   '0a180a0a0a014e10251815209703120a0a0157107a180320c704'
+///   '122248616e6765722c20757020686967682c206e6f7420696e2076656765'
+///   '746174696f6e',
+/// );
+/// print(report['json']);
+/// ```
+/// prints:
+/// ```
+/// Message {
+///   1: Message {
+///     1: Message {
+///       1: "N"
+///       2: 37
+///       3: 21
+///       4: 407
+///     }
+///     2: Message {
+///       1: "W"
+///       2: 122
+///       3: 3
+///       4: 583
+///     }
+///   }
+///   2: "Hanger, up high, not in vegetation"
+/// }
+/// ```
+/// (Field numbers are all the wire format gives us -- there's no schema
+/// here to say field 1 "means" a coordinate or that its sub-fields are a
+/// hemisphere/degrees/minutes/tenths-of-a-second, so unlike a hand-written
+/// `.proto`-derived comment, `decodeProtocolBuffer` can't label them; the
+/// tree above is exactly what the bytes contain.)
+///
+/// Throws [FormatException] if [input] isn't valid hex/base64, or
+/// [ProtoDecodeException] if the decoded bytes aren't a well-formed
+/// sequence of protobuf tag/value pairs.
+Map<String, String> decodeProtocolBuffer(
+  String input, {
+  ByteInputFormat format = ByteInputFormat.auto,
+}) {
+  final fields = decodeProtocolBufferFields(input, format: format);
+  return {
+    'json': _fieldsToPseudoJson(fields, 0),
+    'detail': fields.map((f) => f.describe()).join(),
+  };
+}
+
+String _fieldsToPseudoJson(List<DecodedField> fields, int indent) {
+  final outerPad = '  ' * indent;
+  final innerPad = '  ' * (indent + 1);
+  final buffer = StringBuffer('Message {\n');
+  for (final field in fields) {
+    buffer.writeln(
+      '$innerPad${field.fieldNumber}: ${_pseudoJsonValue(field, indent + 1)}',
+    );
+  }
+  buffer.write('$outerPad}');
+  return buffer.toString();
+}
+
+String _pseudoJsonValue(DecodedField field, int indent) {
+  switch (field.wireType) {
+    case WireType.varint:
+    case WireType.fixed32:
+    case WireType.fixed64:
+      return '${field.value}';
+    case WireType.lengthDelimited:
+      final nested = field.message;
+      if (nested != null) {
+        return _fieldsToPseudoJson(nested, indent);
+      }
+      final text = field.text;
+      if (text != null) {
+        return jsonEncode(text);
+      }
+      return '0x${_hex(field.value as Uint8List)}';
+    case WireType.startGroup:
+      return _fieldsToPseudoJson(field.message ?? const [], indent);
+    case WireType.endGroup:
+      return 'null'; // unreachable: never produced standalone
+  }
 }
 
 List<DecodedField> _decodeFields(ProtoReader reader,

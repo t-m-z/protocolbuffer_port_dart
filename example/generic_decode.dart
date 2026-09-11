@@ -1,6 +1,6 @@
-// Demonstrates decodeProtocolBuffer/describeProtocolBuffer: decoding raw
-// Protocol Buffers bytes with no .proto schema at all, just from a
-// hex/base64 string.
+// Demonstrates decodeProtocolBuffer: decoding raw Protocol Buffers bytes
+// with no .proto schema at all, just from a hex/base64 string, returning a
+// {'json': ..., 'detail': ...} report.
 //
 // Usage: dart run example/generic_decode.dart <hex or base64 string>
 
@@ -13,5 +13,11 @@ void main(List<String> args) {
           '122248616e6765722c20757020686967682c206e6f7420696e2076656765'
           '746174696f6e';
 
-  print(describeProtocolBuffer(input));
+  final report = decodeProtocolBuffer(input);
+
+  print('--- json (pseudo-JSON tree) ---');
+  print(report['json']);
+  print('');
+  print('--- detail (per-field breakdown) ---');
+  print(report['detail']);
 }

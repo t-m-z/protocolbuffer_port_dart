@@ -223,7 +223,7 @@ void main() {
     );
   });
 
-  group('decodeProtocolBuffer (generic, no .proto)', () {
+  group('decodeProtocolBufferFields (generic, no .proto)', () {
     // Same bytes as the "writer/reader scalar fields" message above, built
     // independently to also double as a schema-less decode check.
     final writer = ProtoWriter();
@@ -235,7 +235,7 @@ void main() {
     final bytes = writer.toBytes();
 
     final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
-    final fields = decodeProtocolBuffer(hex);
+    final fields = decodeProtocolBufferFields(hex);
 
     expect(fields.length, 3, 'top-level field count');
     expect(fields[0].fieldNumber, 1, 'field 1 number');
@@ -257,7 +257,7 @@ void main() {
         .toUpperCase()
         .replaceAllMapped(RegExp('.{2}'), (m) => '${m.group(0)} ');
     expect(
-      decodeProtocolBuffer(spaced).length,
+      decodeProtocolBufferFields(spaced).length,
       3,
       'whitespace-padded, uppercase hex decodes the same',
     );
@@ -265,23 +265,23 @@ void main() {
     // base64 input is also accepted (auto-detected).
     final b64 = base64Encode(bytes);
     expect(
-      decodeProtocolBuffer(b64).length,
+      decodeProtocolBufferFields(b64).length,
       3,
       'base64 input decodes the same',
     );
     expect(
-      decodeProtocolBuffer(b64, format: ByteInputFormat.base64).length,
+      decodeProtocolBufferFields(b64, format: ByteInputFormat.base64).length,
       3,
       'explicit ByteInputFormat.base64 works',
     );
 
     expectThrows(
-      () => decodeProtocolBuffer('not valid hex or base64!!'),
+      () => decodeProtocolBufferFields('not valid hex or base64!!'),
       'garbage input raises FormatException',
     );
 
     // A real-world example: the lat/lon-ish message from earlier.
-    final person = decodeProtocolBuffer(
+    final person = decodeProtocolBufferFields(
       '0a180a0a0a014e10251815209703120a0a0157107a180320c704'
       '122248616e6765722c20757020686967682c206e6f7420696e2076656765'
       '746174696f6e',
@@ -295,7 +295,7 @@ void main() {
     expect(coords[0].message![1].value, 37, 'first coordinate degrees field');
   });
 
-  group('decodeProtocolBuffer handles deprecated groups', () {
+  group('decodeProtocolBufferFields handles deprecated groups', () {
     final writer = ProtoWriter();
     writer.writeTag(1, WireType.startGroup);
     writer.writeInt32(2, 99);
@@ -303,11 +303,59 @@ void main() {
     final bytes = writer.toBytes();
     final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
 
-    final fields = decodeProtocolBuffer(hex);
+    final fields = decodeProtocolBufferFields(hex);
     expect(fields.length, 1, 'one top-level group field');
     expect(fields[0].wireType, WireType.startGroup, 'group wire type');
     expect(fields[0].message!.length, 1, 'group contains one inner field');
     expect(fields[0].message![0].value, 99, 'inner field value');
+  });
+
+  group('decodeProtocolBuffer returns a {json, detail} report', () {
+    const addressExampleHex = '0a180a0a0a014e10251815209703120a0a0157107a'
+        '180320c704122248616e6765722c20757020686967682c206e6f7420696e207665'
+        '6765746174696f6e';
+
+    final report = decodeProtocolBuffer(addressExampleHex);
+    expect(report.keys.toList()..sort(), ['detail', 'json'],
+        'report has exactly json+detail keys');
+
+    expect(
+      report['detail'],
+      describeProtocolBuffer(addressExampleHex),
+      "'detail' matches describeProtocolBuffer's output",
+    );
+
+    const expectedJson = 'Message {\n'
+        '  1: Message {\n'
+        '    1: Message {\n'
+        '      1: "N"\n'
+        '      2: 37\n'
+        '      3: 21\n'
+        '      4: 407\n'
+        '    }\n'
+        '    2: Message {\n'
+        '      1: "W"\n'
+        '      2: 122\n'
+        '      3: 3\n'
+        '      4: 583\n'
+        '    }\n'
+        '  }\n'
+        '  2: "Hanger, up high, not in vegetation"\n'
+        '}';
+    expect(report['json'], expectedJson,
+        "'json' matches the expected pseudo-JSON tree");
+
+    // A field whose bytes are neither printable text nor a parseable nested
+    // message falls back to a hex literal in the 'json' rendering.
+    final writer = ProtoWriter();
+    writer.writeBytesField(1, [0xff, 0x00, 0x01]);
+    final hex =
+        writer.toBytes().map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    expect(
+      decodeProtocolBuffer(hex)['json'],
+      'Message {\n  1: 0xff0001\n}',
+      'raw (non-text, non-message) bytes render as a 0x-prefixed hex literal',
+    );
   });
 
   // ignore: avoid_print
